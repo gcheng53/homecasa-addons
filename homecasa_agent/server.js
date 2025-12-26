@@ -103,7 +103,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     agent: 'homecasa-agent',
-    version: '1.0.0',
+    version: '1.0.2',
     timestamp: new Date().toISOString(),
     ha_configured: !!(SUPERVISOR_TOKEN || HA_TOKEN),
   });
@@ -224,6 +224,50 @@ app.get('/ha/config', async (req, res) => {
   } catch (err) {
     log('error', 'Failed to fetch config', { error: err.message });
     res.status(500).json({ error: 'Failed to fetch config', message: err.message });
+  }
+});
+
+// Also expose standard HA API paths for compatibility
+app.get('/api/states', async (req, res) => {
+  try {
+    log('info', 'Proxy: Fetching HA states via /api/states');
+    const states = await haRequest('GET', '/api/states');
+    res.json(states);
+  } catch (err) {
+    log('error', 'Proxy: Failed to fetch states', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch states', message: err.message });
+  }
+});
+app.get('/api/states/:entityId', async (req, res) => {
+  try {
+    const { entityId } = req.params;
+    log('info', 'Proxy: Fetching entity state', { entityId });
+    const state = await haRequest('GET', `/api/states/${entityId}`);
+    res.json(state);
+  } catch (err) {
+    log('error', 'Proxy: Failed to fetch entity state', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch entity state', message: err.message });
+  }
+});
+app.get('/api/config', async (req, res) => {
+  try {
+    log('info', 'Proxy: Fetching HA config via /api/config');
+    const config = await haRequest('GET', '/api/config');
+    res.json(config);
+  } catch (err) {
+    log('error', 'Proxy: Failed to fetch config', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch config', message: err.message });
+  }
+});
+app.post('/api/services/:domain/:service', async (req, res) => {
+  try {
+    const { domain, service } = req.params;
+    log('info', 'Proxy: Calling HA service', { domain, service });
+    const result = await haRequest('POST', `/api/services/${domain}/${service}`, req.body);
+    res.json(result);
+  } catch (err) {
+    log('error', 'Proxy: Failed to call service', { error: err.message });
+    res.status(500).json({ error: 'Failed to call service', message: err.message });
   }
 });
 
