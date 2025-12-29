@@ -173,7 +173,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     agent: 'homecasa-agent',
-    version: '1.0.6',
+    version: '1.0.7',
     timestamp: new Date().toISOString(),
     ha_configured: !!(SUPERVISOR_TOKEN || HA_TOKEN),
     token_source: TOKEN_SOURCE,
