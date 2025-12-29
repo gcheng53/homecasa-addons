@@ -1,5 +1,5 @@
 name: HomeCasa Agent
-version: "1.0.6"
+version: "1.0.7"
 slug: homecasa_agent
 description: Secure bridge between HomeCasa and your Home Assistant - enables remote access via Cloudflare Tunnel
 url: https://github.com/gcheng53/homecasa-addons
