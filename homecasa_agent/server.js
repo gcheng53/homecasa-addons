@@ -23,7 +23,20 @@ const PORT = process.env.PORT || 8099;
 const AGENT_API_KEY = process.env.AGENT_API_KEY;
 const HA_TOKEN = process.env.HA_TOKEN;
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
-const HA_BASE_URL = process.env.HA_BASE_URL || 'http://supervisor/core';
+
+// Determine which token to use and the correct base URL
+// SUPERVISOR_TOKEN works with http://supervisor/core (add-on internal communication)
+// HA_TOKEN (Long-Lived Access Token) requires http://homeassistant.local:8123 or similar
+const EFFECTIVE_HA_TOKEN = SUPERVISOR_TOKEN || HA_TOKEN;
+const TOKEN_SOURCE = SUPERVISOR_TOKEN ? 'SUPERVISOR_TOKEN' : (HA_TOKEN ? 'HA_TOKEN' : 'NONE');
+
+// Use the appropriate base URL based on token source
+// When using SUPERVISOR_TOKEN, use the supervisor proxy
+// When using HA_TOKEN (long-lived access token), must use homeassistant directly
+// Note: Inside HA add-on Docker network, use 'homeassistant:8123' not 'homeassistant.local:8123'
+const HA_BASE_URL = SUPERVISOR_TOKEN 
+  ? 'http://supervisor/core'
+  : (process.env.HA_BASE_URL || 'http://homeassistant:8123');
 
 function log(level, message, data = null) {
   const timestamp = new Date().toISOString();
@@ -38,6 +51,9 @@ function authMiddleware(req, res, next) {
     return next();
   }
   
+  // Accept API key from multiple sources for compatibility:
+  // 1. X-Agent-Api-Key header (preferred)
+  // 2. Authorization: Bearer <key> header
   const apiKey = req.headers['x-agent-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
   
   if (!AGENT_API_KEY) {
@@ -46,7 +62,7 @@ function authMiddleware(req, res, next) {
   }
   
   if (apiKey !== AGENT_API_KEY) {
-    log('warn', 'Invalid API key', { path: req.path });
+    log('warn', 'Invalid API key', { path: req.path, providedKey: apiKey ? apiKey.substring(0, 10) + '...' : 'none' });
     return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or missing API key' });
   }
   
@@ -56,13 +72,22 @@ function authMiddleware(req, res, next) {
 app.use(authMiddleware);
 
 async function haRequest(method, path, body = null) {
-  const token = SUPERVISOR_TOKEN || HA_TOKEN;
-  
-  if (!token) {
+  if (!EFFECTIVE_HA_TOKEN) {
     throw new Error('No HA token configured');
   }
   
-  const url = new URL(path, HA_BASE_URL);
+  // Build the full URL properly - concatenate base + path to avoid URL constructor issues
+  // URL constructor with absolute path (/api/...) would replace the base path (/core)
+  const fullUrl = HA_BASE_URL.replace(/\/$/, '') + path;
+  
+  log('debug', `HA request using ${TOKEN_SOURCE}`, { 
+    method, 
+    path,
+    fullUrl,
+    tokenPreview: EFFECTIVE_HA_TOKEN.substring(0, 10) + '...' 
+  });
+  
+  const url = new URL(fullUrl);
   const isHttps = url.protocol === 'https:';
   const httpModule = isHttps ? https : http;
   
@@ -72,7 +97,7 @@ async function haRequest(method, path, body = null) {
     path: url.pathname + url.search,
     method: method,
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${EFFECTIVE_HA_TOKEN}`,
       'Content-Type': 'application/json',
     },
   };
@@ -117,9 +142,13 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     agent: 'homecasa-agent',
-    version: '1.0.2',
+    version: '1.0.5',
     timestamp: new Date().toISOString(),
     ha_configured: !!(SUPERVISOR_TOKEN || HA_TOKEN),
+    token_source: TOKEN_SOURCE,
+    supervisor_token_present: !!SUPERVISOR_TOKEN,
+    ha_token_present: !!HA_TOKEN,
+    ha_base_url: HA_BASE_URL,
   });
 });
 
@@ -242,6 +271,7 @@ app.get('/ha/config', async (req, res) => {
 });
 
 // Also expose standard HA API paths for compatibility
+// This allows the Agent to act as a drop-in proxy for HA
 app.get('/api/states', async (req, res) => {
   try {
     log('info', 'Proxy: Fetching HA states via /api/states');
@@ -252,6 +282,7 @@ app.get('/api/states', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch states', message: err.message });
   }
 });
+
 app.get('/api/states/:entityId', async (req, res) => {
   try {
     const { entityId } = req.params;
@@ -263,6 +294,7 @@ app.get('/api/states/:entityId', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch entity state', message: err.message });
   }
 });
+
 app.get('/api/config', async (req, res) => {
   try {
     log('info', 'Proxy: Fetching HA config via /api/config');
@@ -273,6 +305,7 @@ app.get('/api/config', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch config', message: err.message });
   }
 });
+
 app.post('/api/services/:domain/:service', async (req, res) => {
   try {
     const { domain, service } = req.params;
@@ -289,5 +322,10 @@ app.listen(PORT, '0.0.0.0', () => {
   log('info', `HomeCasa Agent listening on port ${PORT}`);
   log('info', `HA Base URL: ${HA_BASE_URL}`);
   log('info', `Auth configured: ${!!AGENT_API_KEY}`);
-  log('info', `HA token configured: ${!!(SUPERVISOR_TOKEN || HA_TOKEN)}`);
+  log('info', `HA token source: ${TOKEN_SOURCE}`);
+  log('info', `SUPERVISOR_TOKEN present: ${!!SUPERVISOR_TOKEN}`);
+  log('info', `HA_TOKEN present: ${!!HA_TOKEN}`);
+  if (EFFECTIVE_HA_TOKEN) {
+    log('info', `Token preview: ${EFFECTIVE_HA_TOKEN.substring(0, 15)}...`);
+  }
 });
