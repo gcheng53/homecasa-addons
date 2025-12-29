@@ -79,6 +79,7 @@ async function haRequest(method, path, body = null) {
   // Build the full URL properly - concatenate base + path to avoid URL constructor issues
   // URL constructor with absolute path (/api/...) would replace the base path (/core)
   const fullUrl = HA_BASE_URL.replace(/\/$/, '') + path;
+  const startTime = Date.now();
   
   log('debug', `HA request using ${TOKEN_SOURCE}`, { 
     method, 
@@ -102,11 +103,33 @@ async function haRequest(method, path, body = null) {
     },
   };
   
-  return new Promise((resolve, reject) => {
+  // Use Promise.race for reliable timeout (covers slow responses, not just socket timeout)
+  const REQUEST_TIMEOUT = 15000; // 15 seconds to allow for large responses
+  
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Request timeout after ${REQUEST_TIMEOUT}ms`));
+    }, REQUEST_TIMEOUT);
+  });
+  
+  const requestPromise = new Promise((resolve, reject) => {
     const req = httpModule.request(options, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      log('debug', 'HA response started', { statusCode: res.statusCode, path });
+      
+      res.on('data', chunk => {
+        data += chunk;
+      });
+      
       res.on('end', () => {
+        const duration = Date.now() - startTime;
+        log('debug', 'HA response complete', { 
+          statusCode: res.statusCode, 
+          path, 
+          duration: `${duration}ms`,
+          dataLength: data.length 
+        });
+        
         try {
           const parsed = JSON.parse(data);
           if (res.statusCode >= 400) {
@@ -116,7 +139,7 @@ async function haRequest(method, path, body = null) {
           }
         } catch {
           if (res.statusCode >= 400) {
-            reject(new Error(`HA returned ${res.statusCode}: ${data}`));
+            reject(new Error(`HA returned ${res.statusCode}: ${data.substring(0, 200)}`));
           } else {
             resolve(data);
           }
@@ -124,10 +147,16 @@ async function haRequest(method, path, body = null) {
       });
     });
     
-    req.on('error', reject);
-    req.setTimeout(10000, () => {
+    req.on('error', (err) => {
+      log('error', 'HA request error', { path, error: err.message });
+      reject(err);
+    });
+    
+    // Socket-level timeout as backup
+    req.setTimeout(REQUEST_TIMEOUT + 5000, () => {
+      log('error', 'Socket timeout', { path });
       req.destroy();
-      reject(new Error('Request timeout'));
+      reject(new Error('Socket timeout'));
     });
     
     if (body) {
@@ -135,6 +164,8 @@ async function haRequest(method, path, body = null) {
     }
     req.end();
   });
+  
+  return Promise.race([requestPromise, timeoutPromise]);
 }
 
 app.get('/health', (req, res) => {
@@ -142,7 +173,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     agent: 'homecasa-agent',
-    version: '1.0.5',
+    version: '1.0.6',
     timestamp: new Date().toISOString(),
     ha_configured: !!(SUPERVISOR_TOKEN || HA_TOKEN),
     token_source: TOKEN_SOURCE,
@@ -156,6 +187,7 @@ app.get('/ha/states', async (req, res) => {
   try {
     log('info', 'Fetching HA states');
     const states = await haRequest('GET', '/api/states');
+    log('info', 'Fetched HA states successfully', { count: Array.isArray(states) ? states.length : 'N/A' });
     res.json(states);
   } catch (err) {
     log('error', 'Failed to fetch states', { error: err.message });
