@@ -20,6 +20,9 @@ fi
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 
 bashio::log.info "Starting HomeCasa Agent on port ${PORT}..."
+bashio::log.info "SUPERVISOR_TOKEN present: $([ -n "$SUPERVISOR_TOKEN" ] && echo 'yes' || echo 'no')"
+bashio::log.info "HA_TOKEN present: $([ -n "$HA_TOKEN" ] && echo 'yes' || echo 'no')"
+bashio::log.info "HA_BASE_URL: ${HA_BASE_URL:-'(auto)'}"
 
 # Function to start cloudflared with auto-restart
 start_cloudflared() {
