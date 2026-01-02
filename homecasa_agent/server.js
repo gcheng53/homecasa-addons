@@ -1,23 +1,42 @@
 const express = require('express');
 const http = require('http');
 const https = require('https');
-const crypto = require('crypto');
 
 const app = express();
+
+// CORS middleware - allow requests from any origin (browser-based PWA)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Agent-Api-Key');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 8099;
 const AGENT_API_KEY = process.env.AGENT_API_KEY;
 const HA_TOKEN = process.env.HA_TOKEN;
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
-const HA_BASE_URL = process.env.HA_BASE_URL || 'http://supervisor/core';
-const TUNNEL_TOKEN = process.env.TUNNEL_TOKEN;
 
-// Generate SHA-256 fingerprint of tunnel token for validation (first 12 hex chars)
-function getTunnelTokenFingerprint() {
-  if (!TUNNEL_TOKEN) return null;
-  return crypto.createHash('sha256').update(TUNNEL_TOKEN).digest('hex').substring(0, 12);
-}
+// Determine which token to use and the correct base URL
+// SUPERVISOR_TOKEN works with http://supervisor/core (add-on internal communication)
+// HA_TOKEN (Long-Lived Access Token) requires http://homeassistant.local:8123 or similar
+const EFFECTIVE_HA_TOKEN = SUPERVISOR_TOKEN || HA_TOKEN;
+const TOKEN_SOURCE = SUPERVISOR_TOKEN ? 'SUPERVISOR_TOKEN' : (HA_TOKEN ? 'HA_TOKEN' : 'NONE');
+
+// Use the appropriate base URL based on token source
+// When using SUPERVISOR_TOKEN, use the supervisor proxy
+// When using HA_TOKEN (long-lived access token), must use homeassistant directly
+// Note: Inside HA add-on Docker network, use 'homeassistant:8123' not 'homeassistant.local:8123'
+const HA_BASE_URL = SUPERVISOR_TOKEN 
+  ? 'http://supervisor/core'
+  : (process.env.HA_BASE_URL || 'http://homeassistant:8123');
 
 function log(level, message, data = null) {
   const timestamp = new Date().toISOString();
@@ -32,6 +51,9 @@ function authMiddleware(req, res, next) {
     return next();
   }
   
+  // Accept API key from multiple sources for compatibility:
+  // 1. X-Agent-Api-Key header (preferred)
+  // 2. Authorization: Bearer <key> header
   const apiKey = req.headers['x-agent-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
   
   if (!AGENT_API_KEY) {
@@ -40,7 +62,7 @@ function authMiddleware(req, res, next) {
   }
   
   if (apiKey !== AGENT_API_KEY) {
-    log('warn', 'Invalid API key', { path: req.path });
+    log('warn', 'Invalid API key', { path: req.path, providedKey: apiKey ? apiKey.substring(0, 10) + '...' : 'none' });
     return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or missing API key' });
   }
   
@@ -50,13 +72,39 @@ function authMiddleware(req, res, next) {
 app.use(authMiddleware);
 
 async function haRequest(method, path, body = null) {
-  const token = SUPERVISOR_TOKEN || HA_TOKEN;
-  
-  if (!token) {
+  if (!EFFECTIVE_HA_TOKEN) {
     throw new Error('No HA token configured');
   }
   
-  const url = new URL(path, HA_BASE_URL);
+  if (!HA_BASE_URL) {
+    log('error', 'HA_BASE_URL is empty or undefined', { 
+      HA_BASE_URL, 
+      SUPERVISOR_TOKEN: !!SUPERVISOR_TOKEN,
+      HA_TOKEN: !!HA_TOKEN
+    });
+    throw new Error('HA_BASE_URL is not configured');
+  }
+  
+  // Build the full URL properly - concatenate base + path to avoid URL constructor issues
+  // URL constructor with absolute path (/api/...) would replace the base path (/core)
+  const fullUrl = HA_BASE_URL.replace(/\/$/, '') + path;
+  const startTime = Date.now();
+  
+  log('info', `HA request`, { 
+    method, 
+    path,
+    fullUrl,
+    baseUrl: HA_BASE_URL,
+    tokenSource: TOKEN_SOURCE
+  });
+  
+  let url;
+  try {
+    url = new URL(fullUrl);
+  } catch (urlError) {
+    log('error', 'Invalid URL construction', { fullUrl, baseUrl: HA_BASE_URL, path, error: urlError.message });
+    throw new Error(`Invalid URL: ${fullUrl}`);
+  }
   const isHttps = url.protocol === 'https:';
   const httpModule = isHttps ? https : http;
   
@@ -66,16 +114,38 @@ async function haRequest(method, path, body = null) {
     path: url.pathname + url.search,
     method: method,
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${EFFECTIVE_HA_TOKEN}`,
       'Content-Type': 'application/json',
     },
   };
   
-  return new Promise((resolve, reject) => {
+  // Use Promise.race for reliable timeout (covers slow responses, not just socket timeout)
+  const REQUEST_TIMEOUT = 15000; // 15 seconds to allow for large responses
+  
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Request timeout after ${REQUEST_TIMEOUT}ms`));
+    }, REQUEST_TIMEOUT);
+  });
+  
+  const requestPromise = new Promise((resolve, reject) => {
     const req = httpModule.request(options, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      log('debug', 'HA response started', { statusCode: res.statusCode, path });
+      
+      res.on('data', chunk => {
+        data += chunk;
+      });
+      
       res.on('end', () => {
+        const duration = Date.now() - startTime;
+        log('debug', 'HA response complete', { 
+          statusCode: res.statusCode, 
+          path, 
+          duration: `${duration}ms`,
+          dataLength: data.length 
+        });
+        
         try {
           const parsed = JSON.parse(data);
           if (res.statusCode >= 400) {
@@ -85,7 +155,7 @@ async function haRequest(method, path, body = null) {
           }
         } catch {
           if (res.statusCode >= 400) {
-            reject(new Error(`HA returned ${res.statusCode}: ${data}`));
+            reject(new Error(`HA returned ${res.statusCode}: ${data.substring(0, 200)}`));
           } else {
             resolve(data);
           }
@@ -93,10 +163,16 @@ async function haRequest(method, path, body = null) {
       });
     });
     
-    req.on('error', reject);
-    req.setTimeout(10000, () => {
+    req.on('error', (err) => {
+      log('error', 'HA request error', { path, error: err.message });
+      reject(err);
+    });
+    
+    // Socket-level timeout as backup
+    req.setTimeout(REQUEST_TIMEOUT + 5000, () => {
+      log('error', 'Socket timeout', { path });
       req.destroy();
-      reject(new Error('Request timeout'));
+      reject(new Error('Socket timeout'));
     });
     
     if (body) {
@@ -104,6 +180,8 @@ async function haRequest(method, path, body = null) {
     }
     req.end();
   });
+  
+  return Promise.race([requestPromise, timeoutPromise]);
 }
 
 app.get('/health', (req, res) => {
@@ -111,11 +189,14 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     agent: 'homecasa-agent',
-    version: '1.0.8',
+    version: '1.0.9',
     timestamp: new Date().toISOString(),
     ha_configured: !!(SUPERVISOR_TOKEN || HA_TOKEN),
-    tunnel_token_configured: !!TUNNEL_TOKEN,
-    tunnelTokenFingerprint: getTunnelTokenFingerprint(),
+    token_source: TOKEN_SOURCE,
+    supervisor_token_present: !!SUPERVISOR_TOKEN,
+    ha_token_present: !!HA_TOKEN,
+    ha_base_url: HA_BASE_URL,
+    effective_token_preview: EFFECTIVE_HA_TOKEN ? EFFECTIVE_HA_TOKEN.substring(0, 10) + '...' : 'none',
   });
 });
 
@@ -123,6 +204,7 @@ app.get('/ha/states', async (req, res) => {
   try {
     log('info', 'Fetching HA states');
     const states = await haRequest('GET', '/api/states');
+    log('info', 'Fetched HA states successfully', { count: Array.isArray(states) ? states.length : 'N/A' });
     res.json(states);
   } catch (err) {
     log('error', 'Failed to fetch states', { error: err.message });
@@ -237,9 +319,266 @@ app.get('/ha/config', async (req, res) => {
   }
 });
 
+// Also expose standard HA API paths for compatibility
+// This allows the Agent to act as a drop-in proxy for HA
+app.get('/api/states', async (req, res) => {
+  try {
+    log('info', 'Proxy: Fetching HA states via /api/states');
+    const states = await haRequest('GET', '/api/states');
+    res.json(states);
+  } catch (err) {
+    log('error', 'Proxy: Failed to fetch states', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch states', message: err.message });
+  }
+});
+
+app.get('/api/states/:entityId', async (req, res) => {
+  try {
+    const { entityId } = req.params;
+    log('info', 'Proxy: Fetching entity state', { entityId });
+    const state = await haRequest('GET', `/api/states/${entityId}`);
+    res.json(state);
+  } catch (err) {
+    log('error', 'Proxy: Failed to fetch entity state', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch entity state', message: err.message });
+  }
+});
+
+app.get('/api/config', async (req, res) => {
+  try {
+    log('info', 'Proxy: Fetching HA config via /api/config');
+    const config = await haRequest('GET', '/api/config');
+    res.json(config);
+  } catch (err) {
+    log('error', 'Proxy: Failed to fetch config', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch config', message: err.message });
+  }
+});
+
+app.post('/api/services/:domain/:service', async (req, res) => {
+  try {
+    const { domain, service } = req.params;
+    log('info', 'Proxy: Calling HA service', { domain, service });
+    const result = await haRequest('POST', `/api/services/${domain}/${service}`, req.body);
+    res.json(result);
+  } catch (err) {
+    log('error', 'Proxy: Failed to call service', { error: err.message });
+    res.status(500).json({ error: 'Failed to call service', message: err.message });
+  }
+});
+
+// WebSocket helper to fetch registry data from HA
+// HA only exposes area/entity/device registries via WebSocket API
+async function fetchRegistryViaWebSocket(messageType) {
+  // Try to require ws, with graceful fallback if not available
+  let WebSocket;
+  try {
+    WebSocket = require('ws');
+  } catch (err) {
+    log('error', 'ws package not installed - WebSocket features unavailable');
+    throw new Error('WebSocket support requires the ws package');
+  }
+  
+  return new Promise((resolve, reject) => {
+    // Build WebSocket URL properly from base URL
+    // HA_BASE_URL might be "http://supervisor/core" or "http://homeassistant:8123"
+    let wsUrl;
+    try {
+      const baseUrl = new URL(HA_BASE_URL);
+      const wsProtocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      // WebSocket endpoint is always at /api/websocket on the host, not on the base path
+      wsUrl = `${wsProtocol}//${baseUrl.host}/api/websocket`;
+    } catch (err) {
+      log('error', 'Invalid HA_BASE_URL for WebSocket', { url: HA_BASE_URL });
+      reject(new Error('Invalid HA_BASE_URL'));
+      return;
+    }
+    
+    log('debug', `Connecting to HA WebSocket: ${wsUrl}`);
+    
+    let ws;
+    let resolved = false;
+    const messageId = 1;
+    
+    const cleanup = (error = null) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      try { ws.close(); } catch (e) { /* ignore */ }
+      if (error) reject(error);
+    };
+    
+    const timeout = setTimeout(() => {
+      log('error', 'WebSocket timeout');
+      cleanup(new Error('WebSocket timeout'));
+    }, 10000);
+    
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (err) {
+      clearTimeout(timeout);
+      reject(new Error(`WebSocket connection failed: ${err.message}`));
+      return;
+    }
+    
+    ws.on('open', () => {
+      log('debug', 'WebSocket connected');
+    });
+    
+    ws.on('message', (data) => {
+      if (resolved) return;
+      try {
+        const msg = JSON.parse(data.toString());
+        log('debug', 'WS message received', { type: msg.type });
+        
+        if (msg.type === 'auth_required') {
+          // Send authentication
+          ws.send(JSON.stringify({
+            type: 'auth',
+            access_token: EFFECTIVE_HA_TOKEN
+          }));
+        } else if (msg.type === 'auth_ok') {
+          // Authentication successful, send registry request
+          ws.send(JSON.stringify({
+            id: messageId,
+            type: messageType
+          }));
+        } else if (msg.type === 'auth_invalid') {
+          cleanup(new Error('WebSocket authentication failed'));
+        } else if (msg.type === 'result' && msg.id === messageId) {
+          resolved = true;
+          clearTimeout(timeout);
+          try { ws.close(); } catch (e) { /* ignore */ }
+          if (msg.success) {
+            resolve(msg.result);
+          } else {
+            reject(new Error(msg.error?.message || 'Unknown error'));
+          }
+        }
+      } catch (err) {
+        log('error', 'WS parse error', { error: err.message });
+      }
+    });
+    
+    ws.on('error', (err) => {
+      log('error', 'WebSocket error', { error: err.message });
+      cleanup(err);
+    });
+    
+    ws.on('close', (code, reason) => {
+      log('debug', 'WebSocket closed', { code, reason: reason?.toString() });
+      if (!resolved) {
+        cleanup(new Error('WebSocket closed unexpectedly'));
+      }
+    });
+  });
+}
+
+// Area registry endpoint - fetch all areas/rooms from HA via WebSocket
+app.get('/api/areas', async (req, res) => {
+  try {
+    log('info', 'Fetching HA area registry via WebSocket');
+    const areas = await fetchRegistryViaWebSocket('config/area_registry/list');
+    res.json(areas);
+  } catch (err) {
+    log('error', 'Failed to fetch areas', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch areas', message: err.message });
+  }
+});
+
+// Entity registry endpoint - includes area_id for each entity
+app.get('/api/entity-registry', async (req, res) => {
+  try {
+    log('info', 'Fetching HA entity registry via WebSocket');
+    const entities = await fetchRegistryViaWebSocket('config/entity_registry/list');
+    res.json(entities);
+  } catch (err) {
+    log('error', 'Failed to fetch entity registry', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch entity registry', message: err.message });
+  }
+});
+
+// Device registry endpoint - includes area_id for each device
+app.get('/api/device-registry', async (req, res) => {
+  try {
+    log('info', 'Fetching HA device registry via WebSocket');
+    const devices = await fetchRegistryViaWebSocket('config/device_registry/list');
+    res.json(devices);
+  } catch (err) {
+    log('error', 'Failed to fetch device registry', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch device registry', message: err.message });
+  }
+});
+
+// Get devices with their area assignments
+// Combines entity states with registry data for complete picture
+app.get('/api/devices-with-areas', async (req, res) => {
+  try {
+    log('info', 'Fetching HA entities with area mappings');
+    
+    // Fetch states, entity registry, and area registry in parallel
+    const [states, entityRegistry, areaRegistry] = await Promise.all([
+      haRequest('GET', '/api/states'),
+      fetchRegistryViaWebSocket('config/entity_registry/list').catch(() => []),
+      fetchRegistryViaWebSocket('config/area_registry/list').catch(() => [])
+    ]);
+    
+    // Create lookup maps
+    const entityAreaMap = new Map();
+    entityRegistry.forEach(entity => {
+      if (entity.area_id) {
+        entityAreaMap.set(entity.entity_id, entity.area_id);
+      }
+    });
+    
+    const areaNameMap = new Map();
+    areaRegistry.forEach(area => {
+      areaNameMap.set(area.area_id, area.name);
+    });
+    
+    // Filter to lights and switches, include area info from registry
+    const devices = states
+      .filter(entity => 
+        entity.entity_id.startsWith('light.') || 
+        entity.entity_id.startsWith('switch.')
+      )
+      .map(entity => {
+        const areaId = entityAreaMap.get(entity.entity_id) || null;
+        return {
+          entity_id: entity.entity_id,
+          state: entity.state,
+          friendly_name: entity.attributes.friendly_name || entity.entity_id,
+          area_id: areaId,
+          area_name: areaId ? areaNameMap.get(areaId) : null,
+          device_class: entity.attributes.device_class || null,
+          icon: entity.attributes.icon || null,
+          brightness: entity.attributes.brightness,
+          supported_features: entity.attributes.supported_features
+        };
+      });
+    
+    // Build areas list from registry
+    const areas = areaRegistry.map(a => ({
+      area_id: a.area_id,
+      name: a.name,
+      icon: a.icon || null
+    }));
+    
+    res.json({ devices, areas });
+  } catch (err) {
+    log('error', 'Failed to fetch devices with areas', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch devices', message: err.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   log('info', `HomeCasa Agent listening on port ${PORT}`);
   log('info', `HA Base URL: ${HA_BASE_URL}`);
   log('info', `Auth configured: ${!!AGENT_API_KEY}`);
-  log('info', `HA token configured: ${!!(SUPERVISOR_TOKEN || HA_TOKEN)}`);
+  log('info', `HA token source: ${TOKEN_SOURCE}`);
+  log('info', `SUPERVISOR_TOKEN present: ${!!SUPERVISOR_TOKEN}`);
+  log('info', `HA_TOKEN present: ${!!HA_TOKEN}`);
+  if (EFFECTIVE_HA_TOKEN) {
+    log('info', `Token preview: ${EFFECTIVE_HA_TOKEN.substring(0, 15)}...`);
+  }
 });
