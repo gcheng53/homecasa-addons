@@ -1,5 +1,5 @@
 name: HomeCasa Agent
-version: "1.0.8"
+version: "1.0.9"
 slug: homecasa_agent
 description: Local agent for HomeCasa smart home control - connects Home Assistant to HomeCasa Cloud via Cloudflare Tunnel
 url: https://github.com/homecasa/homecasa-agent
@@ -9,6 +9,7 @@ arch:
   - armhf
   - armv7
   - i386
+init: false
 startup: application
 boot: auto
 host_network: true
