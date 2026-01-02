@@ -1,8 +1,8 @@
 name: HomeCasa Agent
 version: "1.0.9"
 slug: homecasa_agent
-description: Local agent for HomeCasa smart home control - connects Home Assistant to HomeCasa Cloud via Cloudflare Tunnel
-url: https://github.com/homecasa/homecasa-agent
+description: Secure bridge between HomeCasa and your Home Assistant - enables remote access via Cloudflare Tunnel
+url: https://github.com/gcheng53/homecasa-addons
 arch:
   - aarch64
   - amd64
@@ -20,11 +20,13 @@ options:
   tunnel_token: ""
   agent_api_key: ""
   ha_token: ""
+  ha_base_url: ""
   port: 8099
 schema:
   tunnel_token: str
   agent_api_key: str
-  ha_token: str
+  ha_token: str?
+  ha_base_url: str?
   port: int(1024,65535)?
 ports:
   8099/tcp: 8099
