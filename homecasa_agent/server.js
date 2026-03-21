@@ -189,7 +189,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     agent: 'homecasa-agent',
-    version: '1.0.9',
+    version: '1.1.0',
     timestamp: new Date().toISOString(),
     ha_configured: !!(SUPERVISOR_TOKEN || HA_TOKEN),
     token_source: TOKEN_SOURCE,
@@ -571,6 +571,128 @@ app.get('/api/devices-with-areas', async (req, res) => {
   }
 });
 
+// ==================== ZHA WebSocket Event Listener ====================
+
+const zhaEventBuffer = [];
+const ZHA_EVENT_BUFFER_MAX = 100;
+let wsConnected = false;
+let wsReconnectTimer = null;
+let wsMsgId = 100;
+const sseClients = new Set();
+
+function connectHaWebSocket() {
+  const wsUrl = HA_BASE_URL.replace(/^http/, 'ws') + '/websocket';
+  log('info', `[ZHA] Connecting to HA WebSocket: ${wsUrl}`);
+
+  let WebSocket;
+  try {
+    WebSocket = require('ws');
+  } catch (e) {
+    log('error', '[ZHA] ws package not available');
+    return;
+  }
+
+  let ws;
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (e) {
+    log('error', '[ZHA] WebSocket connection failed', { error: e.message });
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = setTimeout(connectHaWebSocket, 10000);
+    return;
+  }
+
+  ws.on('open', () => {
+    log('info', '[ZHA] WebSocket connected');
+  });
+
+  ws.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+
+      if (msg.type === 'auth_required') {
+        ws.send(JSON.stringify({ type: 'auth', access_token: EFFECTIVE_HA_TOKEN }));
+      } else if (msg.type === 'auth_ok') {
+        wsConnected = true;
+        log('info', '[ZHA] Authenticated, subscribing to zha_event...');
+        const subId = wsMsgId++;
+        ws.send(JSON.stringify({
+          id: subId,
+          type: 'subscribe_events',
+          event_type: 'zha_event',
+        }));
+      } else if (msg.type === 'auth_invalid') {
+        log('error', '[ZHA] Auth failed: ' + (msg.message || ''));
+        wsConnected = false;
+        ws.close();
+      } else if (msg.type === 'event' && msg.event && msg.event.event_type === 'zha_event') {
+        const data = msg.event.data || {};
+        const event = {
+          command: data.command || 'unknown',
+          device_ieee: data.device_ieee || '',
+          unique_id: data.unique_id || '',
+          args: data.args,
+          params: data.params,
+          timestamp: new Date().toISOString(),
+        };
+        log('info', `[ZHA] Event: ${event.command} from ${event.device_ieee}`, data);
+        zhaEventBuffer.unshift(event);
+        if (zhaEventBuffer.length > ZHA_EVENT_BUFFER_MAX) {
+          zhaEventBuffer.length = ZHA_EVENT_BUFFER_MAX;
+        }
+
+        for (const client of sseClients) {
+          try {
+            client.write(`data: ${JSON.stringify(event)}\n\n`);
+          } catch (e) { /* ignore */ }
+        }
+      }
+    } catch (e) {
+      log('error', '[ZHA] Parse error', { error: e.message });
+    }
+  });
+
+  ws.on('close', () => {
+    log('info', '[ZHA] WebSocket closed, reconnecting in 10s...');
+    wsConnected = false;
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = setTimeout(connectHaWebSocket, 10000);
+  });
+
+  ws.on('error', (err) => {
+    log('error', '[ZHA] WebSocket error', { error: err.message || String(err) });
+  });
+}
+
+app.get('/ha/zha-events', (req, res) => {
+  const ieee = req.query.ieee;
+  const limit = Math.min(parseInt(req.query.limit) || 50, ZHA_EVENT_BUFFER_MAX);
+  let events = zhaEventBuffer;
+  if (ieee) {
+    events = events.filter(e => e.device_ieee === ieee);
+  }
+  res.json({ success: true, connected: wsConnected, events: events.slice(0, limit) });
+});
+
+app.get('/ha/zha-events/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', wsConnected, buffered: zhaEventBuffer.length })}\n\n`);
+
+  sseClients.add(res);
+  req.on('close', () => {
+    sseClients.delete(res);
+  });
+});
+
+// ==================== Start Server ====================
+
 app.listen(PORT, '0.0.0.0', () => {
   log('info', `HomeCasa Agent listening on port ${PORT}`);
   log('info', `HA Base URL: ${HA_BASE_URL}`);
@@ -581,4 +703,6 @@ app.listen(PORT, '0.0.0.0', () => {
   if (EFFECTIVE_HA_TOKEN) {
     log('info', `Token preview: ${EFFECTIVE_HA_TOKEN.substring(0, 15)}...`);
   }
+
+  connectHaWebSocket();
 });
