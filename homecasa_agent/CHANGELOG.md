@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- Local automation engine: agent can now run automations locally without cloud round-trip
+- Cloud config sync: pulls automation bundle from HomeCasa Cloud every 30 seconds
+- Supports button triggers (ZHA), sensor triggers (state_changed), and time triggers
+- Scene actions resolved to concrete device commands for local execution
+- New config options: `homecasa_cloud_url`, `home_id`
+- Offline resilience: agent keeps running with last synced bundle when internet is down
+- Automation mode: controlled from the app (Cloud vs Local toggle on Automations page)
+- WebSocket subscription to both `zha_event` and `state_changed` for real-time triggers
+
 ## 1.1.0
 
 - ZHA WebSocket event listener for real-time sensor events (tilt, drop, vibration)

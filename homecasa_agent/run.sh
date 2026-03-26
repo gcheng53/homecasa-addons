@@ -6,6 +6,8 @@ TUNNEL_TOKEN=$(bashio::config 'tunnel_token')
 AGENT_API_KEY=$(bashio::config 'agent_api_key')
 HA_TOKEN=$(bashio::config 'ha_token')
 HA_BASE_URL=$(bashio::config 'ha_base_url')
+HOMECASA_CLOUD_URL=$(bashio::config 'homecasa_cloud_url')
+HOME_ID=$(bashio::config 'home_id')
 PORT=$(bashio::config 'port')
 
 export TUNNEL_TOKEN
@@ -16,13 +18,21 @@ export PORT
 if [ -n "$HA_BASE_URL" ]; then
   export HA_BASE_URL
 fi
+if [ -n "$HOMECASA_CLOUD_URL" ]; then
+  export HOMECASA_CLOUD_URL
+fi
+if [ -n "$HOME_ID" ]; then
+  export HOME_ID
+fi
 # SUPERVISOR_TOKEN is automatically injected by Home Assistant for add-ons with homeassistant_api: true
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 
-bashio::log.info "Starting HomeCasa Agent on port ${PORT}..."
+bashio::log.info "Starting HomeCasa Agent v1.2.0 on port ${PORT}..."
 bashio::log.info "SUPERVISOR_TOKEN present: $([ -n "$SUPERVISOR_TOKEN" ] && echo 'yes' || echo 'no')"
 bashio::log.info "HA_TOKEN present: $([ -n "$HA_TOKEN" ] && echo 'yes' || echo 'no')"
 bashio::log.info "HA_BASE_URL: ${HA_BASE_URL:-'(auto)'}"
+bashio::log.info "HOMECASA_CLOUD_URL: ${HOMECASA_CLOUD_URL:-'(default)'}"
+bashio::log.info "HOME_ID: ${HOME_ID:-'(not set - will discover from sync)'}"
 
 # Function to start cloudflared with auto-restart
 start_cloudflared() {
