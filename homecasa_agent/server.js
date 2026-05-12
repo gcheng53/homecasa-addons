@@ -741,14 +741,18 @@ function connectHaWebSocket() {
             else if (msg.type === "event" && msg.event?.event_type === "zha_event") {
                 const data = msg.event.data || {};
                 const event = {
-                    command: data.command || "unknown",
-                    device_ieee: data.device_ieee || "",
+                    command: data.command || data.event || data.action || "unknown",
+                    device_ieee: data.device_ieee || data.ieee || "",
                     unique_id: data.unique_id || "",
                     args: data.args,
                     params: data.params,
                     timestamp: new Date().toISOString(),
+                    endpoint_id: data.endpoint_id ?? data.endpoint,
+                    cluster_id: data.cluster_id ?? data.cluster,
+                    device_id: data.device_id,
+                    raw: data,
                 };
-                console.log(`[Agent/ZHA] Event: ${event.command} from ${event.device_ieee}`);
+                console.log(`[Agent/ZHA] Event: cmd=${event.command} ieee=${event.device_ieee} ep=${event.endpoint_id} cl=${event.cluster_id} raw=${JSON.stringify(data)}`);
                 zhaEventBuffer.unshift(event);
                 if (zhaEventBuffer.length > ZHA_EVENT_BUFFER_MAX) {
                     zhaEventBuffer.length = ZHA_EVENT_BUFFER_MAX;
