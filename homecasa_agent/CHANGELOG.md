@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.4
+
+- Fix: raise per-IP rate limit from 100/min to 5000/min — the cloud tunnel routes all PWA clients through a single IP, so the previous limit was tripped by routine state polling, causing 'Failed to control device: HTTP 429: Rate limit exceeded' errors
+
+
 ## 1.2.3
 
 - Fix: restore CORS middleware (Access-Control-Allow-Origin: *) so the PWA at homecasa.ai can call the agent's tunnel domain directly without preflight failures
