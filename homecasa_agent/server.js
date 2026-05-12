@@ -223,12 +223,21 @@ app.get("/tts-cache/:id.mp3", (req, res) => {
 app.get("/health", (req, res) => {
     res.json({
         status: "ok",
+        agent: "homecasa-agent",
+        service: "homecasa-agent",
         mode: "agent",
-        version: "1.1.0",
+        version: "1.2.2",
         haConfigured: !!config.haToken,
         ttsCacheSupported: true,
         timestamp: new Date().toISOString(),
     });
+});
+app.get("/ha/config", authenticateAgent, async (_req, res) => {
+    const result = await callHA("GET", "/config");
+    if (!result.success) {
+        return res.status(500).json({ error: result.error });
+    }
+    res.json(result.data);
 });
 // GET /ha/states - Get all entity states (proxies to HA /api/states)
 app.get("/ha/states", authenticateAgent, async (req, res) => {
