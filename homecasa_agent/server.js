@@ -40,6 +40,15 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: "5mb" }));
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Agent-Api-Key");
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    next();
+});
 // Configuration from environment (set by run.sh from add-on config)
 const config = {
     haUrl: process.env.HA_URL || process.env.HA_BASE_URL || "http://supervisor/core",
@@ -226,7 +235,7 @@ app.get("/health", (req, res) => {
         agent: "homecasa-agent",
         service: "homecasa-agent",
         mode: "agent",
-        version: "1.2.2",
+        version: "1.2.3",
         haConfigured: !!config.haToken,
         ttsCacheSupported: true,
         timestamp: new Date().toISOString(),
