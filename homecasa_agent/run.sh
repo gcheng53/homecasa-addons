@@ -27,7 +27,7 @@ fi
 # SUPERVISOR_TOKEN is automatically injected by Home Assistant for add-ons with homeassistant_api: true
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 
-bashio::log.info "Starting HomeCasa Agent v1.2.0 on port ${PORT}..."
+bashio::log.info "Starting HomeCasa Agent v1.2.1 on port ${PORT}..."
 bashio::log.info "SUPERVISOR_TOKEN present: $([ -n "$SUPERVISOR_TOKEN" ] && echo 'yes' || echo 'no')"
 bashio::log.info "HA_TOKEN present: $([ -n "$HA_TOKEN" ] && echo 'yes' || echo 'no')"
 bashio::log.info "HA_BASE_URL: ${HA_BASE_URL:-'(auto)'}"
