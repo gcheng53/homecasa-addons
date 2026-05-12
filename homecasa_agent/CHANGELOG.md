@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3
+
+- Fix: restore CORS middleware (Access-Control-Allow-Origin: *) so the PWA at homecasa.ai can call the agent's tunnel domain directly without preflight failures
+
+
 ## 1.2.2
 
 - Fix: restore `agent: "homecasa-agent"` field in /health response (required by client connection check)
