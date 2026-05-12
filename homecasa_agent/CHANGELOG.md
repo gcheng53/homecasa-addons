@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.2
+
+- Fix: restore `agent: "homecasa-agent"` field in /health response (required by client connection check)
+- Fix: restore /ha/config proxy route (required by client auth check)
+- Both fixes resolve Home/Remote connection showing red after upgrade from 1.1.0
+
+
 ## 1.2.1
 
 - Capture full ZHA event payload (endpoint_id, cluster_id, device_id, raw data) to support Aqara H2 4-button scene endpoint and other non-standard ZHA events
