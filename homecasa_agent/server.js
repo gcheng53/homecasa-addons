@@ -61,7 +61,7 @@ const config = {
 };
 // Rate limiting state
 const rateLimitMap = new Map();
-const RATE_LIMIT = 100; // requests per minute
+const RATE_LIMIT = 5000; // requests per minute (cloud tunnel shares one IP across all PWA clients)
 const RATE_WINDOW = 60000; // 1 minute
 // Middleware: Rate limiting
 function rateLimit(req, res, next) {
@@ -235,7 +235,7 @@ app.get("/health", (req, res) => {
         agent: "homecasa-agent",
         service: "homecasa-agent",
         mode: "agent",
-        version: "1.2.3",
+        version: "1.2.4",
         haConfigured: !!config.haToken,
         ttsCacheSupported: true,
         timestamp: new Date().toISOString(),
