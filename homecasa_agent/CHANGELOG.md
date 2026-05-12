@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- Capture full ZHA event payload (endpoint_id, cluster_id, device_id, raw data) to support Aqara H2 4-button scene endpoint and other non-standard ZHA events
+- Try alternate field names (event/action, ieee) when parsing zha_event so events without a 'command' field are still identified
+- Improved debug logging of raw ZHA event data
+
+
 ## 1.2.0
 
 - Local automation engine: agent can now run automations locally without cloud round-trip
