@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0
+
+- Cloud WebSocket relay at `/api/websocket` (and `/websocket`). HomeCasa Cloud can now open a real-time WebSocket through the tunnel instead of falling back to ~1s polling. The relay reuses the agent's single authed Home Assistant connection and fans `state_changed` and `zha_event` events out to cloud clients, so button/cube/tilt presses react instantly with no background polling. Cloud authenticates with the Agent API Key as the WebSocket access token.
+
+
 ## 1.2.4
 
 - Fix: raise per-IP rate limit from 100/min to 5000/min — the cloud tunnel routes all PWA clients through a single IP, so the previous limit was tripped by routine state polling, causing 'Failed to control device: HTTP 429: Rate limit exceeded' errors
