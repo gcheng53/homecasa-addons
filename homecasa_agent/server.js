@@ -758,6 +758,7 @@ function connectHaWebSocket() {
             }
             else if (msg.type === "event" && msg.event?.event_type === "zha_event") {
                 const data = msg.event.data || {};
+                broadcastToRelay("zha_event", data);
                 const event = {
                     command: data.command || data.event || data.action || "unknown",
                     device_ieee: data.device_ieee || data.ieee || "",
@@ -790,6 +791,7 @@ function connectHaWebSocket() {
             }
             else if (msg.type === "event" && msg.event?.event_type === "state_changed") {
                 const data = msg.event.data || {};
+                broadcastToRelay("state_changed", data);
                 const entityId = data.entity_id;
                 const newState = data.new_state?.state;
                 const oldState = data.old_state?.state;
@@ -874,19 +876,137 @@ if (config.heartbeatInterval > 0) {
     // Send initial heartbeat after startup
     setTimeout(sendHeartbeat, 5000);
 }
+// ==================== Cloud WebSocket Relay ====================
+// HomeCasa Cloud opens a WebSocket to wss://<tunnel>/api/websocket to receive
+// real-time HA events (state_changed + zha_event). Reuses the single authed HA
+// connection (connectHaWebSocket above) and fans its events out to relay clients,
+// emulating just enough of the HA WebSocket protocol that the cloud's existing HA
+// WebSocket client works unchanged: greet with auth_required, validate the agent
+// API key sent as access_token, ack subscribe_events, then stream event envelopes.
+const relayClients = new Set();
+const RELAY_AUTH_TIMEOUT_MS = 10000;
+const RELAY_PING_INTERVAL_MS = 30000;
+function broadcastToRelay(eventType, data) {
+    if (relayClients.size === 0)
+        return;
+    const payload = JSON.stringify({ type: "event", event: { event_type: eventType, data } });
+    for (const client of relayClients) {
+        if (!client.authed)
+            continue;
+        if (!client.events.has(eventType) && !client.events.has("*"))
+            continue;
+        try {
+            client.ws.send(payload);
+        }
+        catch { }
+    }
+}
+function handleRelayConnection(ws) {
+    const client = { ws, events: new Set(), authed: false, pingTimer: null };
+    relayClients.add(client);
+    console.log(`[Agent/Relay] Cloud client connected (total ${relayClients.size})`);
+    try {
+        ws.send(JSON.stringify({ type: "auth_required", ha_version: "homecasa-agent" }));
+    }
+    catch { }
+    const authTimer = setTimeout(() => {
+        if (!client.authed) {
+            try {
+                ws.send(JSON.stringify({ type: "auth_invalid", message: "auth timeout" }));
+            }
+            catch { }
+            try {
+                ws.close();
+            }
+            catch { }
+        }
+    }, RELAY_AUTH_TIMEOUT_MS);
+    const cleanup = () => {
+        clearTimeout(authTimer);
+        if (client.pingTimer)
+            clearInterval(client.pingTimer);
+        relayClients.delete(client);
+    };
+    ws.on("message", (raw) => {
+        let msg;
+        try {
+            msg = JSON.parse(raw.toString());
+        }
+        catch {
+            return;
+        }
+        if (msg.type === "auth") {
+            if (msg.access_token && msg.access_token === config.agentApiKey) {
+                client.authed = true;
+                clearTimeout(authTimer);
+                try {
+                    ws.send(JSON.stringify({ type: "auth_ok", ha_version: "homecasa-agent" }));
+                }
+                catch { }
+                client.pingTimer = setInterval(() => { try {
+                    ws.ping();
+                }
+                catch { } }, RELAY_PING_INTERVAL_MS);
+                console.log("[Agent/Relay] Cloud client authenticated");
+            }
+            else {
+                try {
+                    ws.send(JSON.stringify({ type: "auth_invalid", message: "invalid access token" }));
+                }
+                catch { }
+                try {
+                    ws.close();
+                }
+                catch { }
+            }
+            return;
+        }
+        if (!client.authed)
+            return;
+        if (msg.type === "subscribe_events") {
+            client.events.add(msg.event_type || "*");
+            if (typeof msg.id === "number") {
+                try {
+                    ws.send(JSON.stringify({ id: msg.id, type: "result", success: true, result: null }));
+                }
+                catch { }
+            }
+            return;
+        }
+        if (typeof msg.id === "number") {
+            try {
+                ws.send(JSON.stringify({ id: msg.id, type: "result", success: true, result: null }));
+            }
+            catch { }
+        }
+    });
+    ws.on("close", () => {
+        cleanup();
+        console.log(`[Agent/Relay] Cloud client disconnected (total ${relayClients.size})`);
+    });
+    ws.on("error", cleanup);
+}
+let WebSocketServerCtor = null;
+try {
+    WebSocketServerCtor = require("ws").WebSocketServer;
+}
+catch (e) {
+    console.error("[Agent/Relay] ws module not available, cloud relay disabled:", e);
+}
 // ==================== Start Server ====================
 const PWA_SYNC_INTERVAL = 30 * 60 * 1000;
 loadSyncBundle();
 if (config.homeId && !syncHomeId) {
     syncHomeId = config.homeId;
 }
-app.listen(config.port, "0.0.0.0", () => {
+const server = app.listen(config.port, "0.0.0.0", () => {
     console.log(`[Agent] HomeCasa Agent running on port ${config.port}`);
     console.log(`[Agent] HA URL: ${config.haUrl}`);
     console.log(`[Agent] HA Token configured: ${config.haToken ? "Yes" : "No"}`);
     console.log(`[Agent] Agent API Key configured: ${config.agentApiKey ? "Yes" : "No"}`);
     console.log(`[Agent] Home ID: ${syncHomeId || "(not set)"}`);
     console.log(`[Agent] Local automations: ${localAutomationsEnabled ? "enabled" : "disabled"}`);
+    console.log(`[Agent/Relay] Cloud WebSocket relay ${WebSocketServerCtor ? "enabled" : "DISABLED (ws missing)"} at /api/websocket`);
     connectHaWebSocket();
     setTimeout(async () => {
         console.log("[Agent/PWA] Initial sync starting...");
@@ -907,3 +1027,21 @@ app.listen(config.port, "0.0.0.0", () => {
         processLocalAutomations();
     }, 1000);
 });
+if (WebSocketServerCtor) {
+    const wss = new WebSocketServerCtor({ noServer: true });
+    server.on("upgrade", (req, socket, head) => {
+        let pathname = "";
+        try {
+            pathname = new URL(req.url, "http://localhost").pathname;
+        }
+        catch {
+            pathname = req.url || "";
+        }
+        if (pathname === "/api/websocket" || pathname === "/websocket") {
+            wss.handleUpgrade(req, socket, head, (ws) => handleRelayConnection(ws));
+        }
+        else {
+            socket.destroy();
+        }
+    });
+}
