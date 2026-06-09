@@ -27,7 +27,7 @@ fi
 # SUPERVISOR_TOKEN is automatically injected by Home Assistant for add-ons with homeassistant_api: true
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 
-bashio::log.info "Starting HomeCasa Agent v1.4.0 on port ${PORT}..."
+bashio::log.info "Starting HomeCasa Agent v1.4.1 on port ${PORT}..."
 
 # Deploy the bundled HomeCasa conversation integration into Home Assistant so
 # the Voice puck can use HomeCasa as its brain — no manual file copying. The

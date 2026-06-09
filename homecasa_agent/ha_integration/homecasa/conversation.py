@@ -8,6 +8,7 @@ import aiohttp
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -39,7 +40,11 @@ class HomeCasaConversationEntity(conversation.ConversationEntity):
 
     _attr_has_entity_name = True
     _attr_name = "HomeCasa"
-    _attr_supported_languages = "*"
+
+    @property
+    def supported_languages(self) -> list[str] | str:
+        """HomeCasa handles language detection itself, so accept any language."""
+        return MATCH_ALL
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the agent."""
