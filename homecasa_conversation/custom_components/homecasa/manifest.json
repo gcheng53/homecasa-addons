@@ -1,0 +1,12 @@
+{
+  "domain": "homecasa",
+  "name": "HomeCasa",
+  "codeowners": ["@homecasa"],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://homecasa.ai",
+  "iot_class": "cloud_polling",
+  "integration_type": "service",
+  "requirements": [],
+  "version": "1.0.0"
+}

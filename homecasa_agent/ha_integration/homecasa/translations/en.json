@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to HomeCasa",
+        "description": "Enter your HomeCasa Cloud URL and the agent API key for this home. HomeCasa becomes the brain for your Voice puck.",
+        "data": {
+          "url": "HomeCasa Cloud URL",
+          "api_key": "Agent API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach HomeCasa Cloud. Check the URL and your network.",
+      "invalid_auth": "The agent API key was rejected. Check that it matches this home's tunnel."
+    },
+    "abort": {
+      "already_configured": "This HomeCasa agent key is already configured."
+    }
+  }
+}

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0
+
+- Bundled the **HomeCasa conversation integration** with the Agent. On start the add-on copies the `homecasa` custom component into Home Assistant's `custom_components/` folder and writes a small bootstrap file so the integration **auto-configures** using this home's existing agent API key — no manual file copying and no re-entering the key. Requires the new `homeassistant_config` mapping. After installing/updating, **restart Home Assistant once** so it loads the integration, then pick **HomeCasa** as the conversation agent under Settings → Voice assistants.
+
 ## 1.3.0
 
 - Cloud WebSocket relay at `/api/websocket` (and `/websocket`). HomeCasa Cloud can now open a real-time WebSocket through the tunnel instead of falling back to ~1s polling. The relay reuses the agent's single authed Home Assistant connection and fans `state_changed` and `zha_event` events out to cloud clients, so button/cube/tilt presses react instantly with no background polling. Cloud authenticates with the Agent API Key as the WebSocket access token.

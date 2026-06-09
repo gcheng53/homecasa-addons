@@ -27,7 +27,49 @@ fi
 # SUPERVISOR_TOKEN is automatically injected by Home Assistant for add-ons with homeassistant_api: true
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 
-bashio::log.info "Starting HomeCasa Agent v1.2.1 on port ${PORT}..."
+bashio::log.info "Starting HomeCasa Agent v1.4.0 on port ${PORT}..."
+
+# Deploy the bundled HomeCasa conversation integration into Home Assistant so
+# the Voice puck can use HomeCasa as its brain — no manual file copying. The
+# integration self-configures from the bootstrap file we write below, using
+# this home's existing agent API key.
+deploy_conversation_integration() {
+    HA_CONFIG=""
+    if [ -d /homeassistant ]; then
+        HA_CONFIG=/homeassistant
+    elif [ -d /config ]; then
+        HA_CONFIG=/config
+    fi
+
+    if [ -z "$HA_CONFIG" ]; then
+        bashio::log.warning "HA config dir not mapped; skipping conversation integration deploy."
+        return
+    fi
+    if [ ! -d /app/ha_integration/homecasa ]; then
+        bashio::log.warning "Bundled conversation integration missing; skipping deploy."
+        return
+    fi
+
+    mkdir -p "$HA_CONFIG/custom_components"
+    rm -rf "$HA_CONFIG/custom_components/homecasa"
+    cp -r /app/ha_integration/homecasa "$HA_CONFIG/custom_components/"
+    bashio::log.info "Deployed HomeCasa conversation integration to $HA_CONFIG/custom_components/homecasa"
+
+    if [ -n "$AGENT_API_KEY" ]; then
+        # Write the bootstrap as proper JSON (safe escaping) and rename
+        # atomically so the integration never reads a half-written file.
+        BOOT_PATH="$HA_CONFIG/homecasa_agent.json" \
+        BOOT_URL="${HOMECASA_CLOUD_URL:-https://homecasa.ai}" \
+        BOOT_KEY="$AGENT_API_KEY" \
+        node -e 'const fs=require("fs");const p=process.env.BOOT_PATH;const o={url:process.env.BOOT_URL,api_key:process.env.BOOT_KEY};fs.writeFileSync(p+".tmp",JSON.stringify(o));fs.renameSync(p+".tmp",p);'
+        chmod 600 "$HA_CONFIG/homecasa_agent.json" 2>/dev/null || true
+        bashio::log.info "Wrote HomeCasa bootstrap config for auto-setup (restart HA once to load the integration)."
+    else
+        bashio::log.warning "No agent_api_key set; integration deployed but not auto-configured."
+    fi
+}
+
+deploy_conversation_integration
 bashio::log.info "SUPERVISOR_TOKEN present: $([ -n "$SUPERVISOR_TOKEN" ] && echo 'yes' || echo 'no')"
 bashio::log.info "HA_TOKEN present: $([ -n "$HA_TOKEN" ] && echo 'yes' || echo 'no')"
 bashio::log.info "HA_BASE_URL: ${HA_BASE_URL:-'(auto)'}"

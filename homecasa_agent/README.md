@@ -8,6 +8,21 @@ Secure bridge between HomeCasa and your Home Assistant.
 - **Cloudflare Tunnel**: Secure remote access without port forwarding
 - **API key authentication**: Only authorized requests are accepted
 - **Automatic HA integration**: Uses Supervisor token, no manual token needed
+- **Bundled voice brain**: Automatically installs and configures the HomeCasa
+  conversation integration so the HA Voice puck uses HomeCasa as its brain
+
+## Voice puck (HomeCasa conversation integration)
+
+This add-on bundles the HomeCasa conversation integration. On start it copies it
+into Home Assistant and self-configures it with your agent API key — you don't
+copy any files or re-enter the key. To finish setup:
+
+1. Install or update the HomeCasa Agent and start it.
+2. **Restart Home Assistant once** (so it loads the newly installed integration).
+3. Go to **Settings → Voice assistants**, edit your assistant, and set the
+   **Conversation agent** to **HomeCasa**. Use a **local** text-to-speech engine
+   (e.g. Piper) so the puck speaks replies itself without a cold-speaker delay.
+4. Assign that assistant to your Voice puck.
 
 ## Configuration
 
