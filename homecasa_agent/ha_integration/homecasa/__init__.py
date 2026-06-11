@@ -22,7 +22,7 @@ from .const import BOOTSTRAP_FILE, CONF_API_KEY, CONF_URL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.CONVERSATION]
+PLATFORMS: list[Platform] = [Platform.CONVERSATION, Platform.TTS]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

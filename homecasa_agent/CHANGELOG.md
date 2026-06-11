@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0
+
+- The HomeCasa conversation integration now also installs a **HomeCasa text-to-speech voice**. This lets the Voice puck reply in HomeCasa's own warm voice instead of Home Assistant's default robotic one. After updating, **restart Home Assistant once**, then in **Settings → Voice assistants** open your assistant and set **Text-to-speech** to **HomeCasa**. Home Assistant plays the reply on the puck itself, so there's no echo and only one voice.
+
 ## 1.4.0
 
 - Bundled the **HomeCasa conversation integration** with the Agent. On start the add-on copies the `homecasa` custom component into Home Assistant's `custom_components/` folder and writes a small bootstrap file so the integration **auto-configures** using this home's existing agent API key — no manual file copying and no re-entering the key. Requires the new `homeassistant_config` mapping. After installing/updating, **restart Home Assistant once** so it loads the integration, then pick **HomeCasa** as the conversation agent under Settings → Voice assistants.
