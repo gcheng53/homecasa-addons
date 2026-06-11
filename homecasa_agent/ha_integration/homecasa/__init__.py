@@ -58,9 +58,23 @@ async def _async_try_bootstrap(hass: HomeAssistant) -> None:
     if not url or not api_key:
         return
 
-    # Already configured for this key? Nothing to do.
+    # Already configured for this key? Make sure the saved URL still matches the
+    # add-on's current cloud URL. The user may have switched the add-on between
+    # dev and prod (the key is intentionally the same on both), so if the URL
+    # changed, update the entry in place and reload it so the voice pipeline
+    # (STT / conversation / TTS) follows the new URL without a manual re-add.
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.data.get(CONF_API_KEY) == api_key:
+            if entry.data.get(CONF_URL) != url:
+                _LOGGER.info(
+                    "HomeCasa: cloud URL changed (%s -> %s); updating entry",
+                    entry.data.get(CONF_URL),
+                    url,
+                )
+                hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_URL: url}
+                )
+                await hass.config_entries.async_reload(entry.entry_id)
             return
 
     _LOGGER.info("HomeCasa: auto-configuring from Agent bootstrap file")
