@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2
+
+- The HomeCasa conversation integration now also installs a **HomeCasa speech-to-text** option. This lets the Voice puck understand **both English and Chinese under a single wake word** — just speak either language, no toggle. After updating, **restart Home Assistant once**, then in **Settings → Voice assistants** open your assistant and set **Speech-to-text** to **HomeCasa**. (This option uses the cloud, so it needs internet; Home Assistant's local faster-whisper stays available as the offline, single-language choice — you can switch between them to compare speed.)
+
 ## 1.5.1
 
 - The Agent now **learns which home it belongs to automatically** from its regular check-in with HomeCasa Cloud — no need to fill in a Home ID by hand. This switches on the **offline automation backup** (the Agent keeps a local copy of your automations so they keep running even if the internet drops). This change doesn't affect the voice features.

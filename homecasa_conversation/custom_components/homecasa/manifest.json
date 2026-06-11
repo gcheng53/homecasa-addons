@@ -3,10 +3,10 @@
   "name": "HomeCasa",
   "codeowners": ["@homecasa"],
   "config_flow": true,
-  "dependencies": ["conversation"],
+  "dependencies": ["conversation", "tts", "stt"],
   "documentation": "https://homecasa.ai",
   "iot_class": "cloud_polling",
   "integration_type": "service",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.2.0"
 }
