@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1
+
+- The Agent now **learns which home it belongs to automatically** from its regular check-in with HomeCasa Cloud — no need to fill in a Home ID by hand. This switches on the **offline automation backup** (the Agent keeps a local copy of your automations so they keep running even if the internet drops). This change doesn't affect the voice features.
+
 ## 1.5.0
 
 - The HomeCasa conversation integration now also installs a **HomeCasa text-to-speech voice**. This lets the Voice puck reply in HomeCasa's own warm voice instead of Home Assistant's default robotic one. After updating, **restart Home Assistant once**, then in **Settings → Voice assistants** open your assistant and set **Text-to-speech** to **HomeCasa**. Home Assistant plays the reply on the puck itself, so there's no echo and only one voice.

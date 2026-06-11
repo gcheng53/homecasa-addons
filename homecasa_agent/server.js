@@ -861,6 +861,15 @@ async function sendHeartbeat() {
         });
         if (response.ok) {
             console.log("[Agent] Heartbeat sent successfully");
+            try {
+                const data = await response.json();
+                if (data?.homeId && !syncHomeId) {
+                    syncHomeId = data.homeId;
+                    console.log(`[Agent] Learned homeId from heartbeat: ${syncHomeId}`);
+                    syncConfigFromCloud().catch(() => { });
+                }
+            }
+            catch { }
         }
         else {
             console.warn("[Agent] Heartbeat failed:", response.status);
