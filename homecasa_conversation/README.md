@@ -23,8 +23,11 @@ You speak → Voice puck (wake + STT) → HA "HomeCasa" conversation agent
 ```
 
 The conversation agent forwards the recognized sentence to HomeCasa Cloud at
-`POST /api/agent/voice` and speaks back whatever HomeCasa returns. If HomeCasa
-asks a clarifying question, the puck keeps listening for your answer.
+`POST /api/agent/voice` and speaks back whatever HomeCasa returns. After a
+successful command — or when HomeCasa asks a clarifying question — the puck keeps
+listening, so you can give a follow-up command without saying the wake word
+again. The back-and-forth is bounded (turn cap + short timeout), and the puck
+mutes its own mic while it speaks so it never hears its own reply.
 
 ## Requirements
 
@@ -103,9 +106,12 @@ and acts, and the puck speaks HomeCasa's answer.
 
 - **Naming:** HomeCasa always answers using the names you gave your devices.
   There is no need to sync Home Assistant aliases — the brain owns the naming.
-- **Follow‑ups:** when HomeCasa asks a clarifying question, the agent reports
-  `continue_conversation = true` so the puck reopens the mic. The clarification
-  context is held briefly per conversation on the cloud side.
+- **Follow‑ups:** after a successful command, and when HomeCasa asks a clarifying
+  question, the agent reports `continue_conversation = true` so the puck keeps the
+  mic open for the next turn — a back-and-forth without re-waking. It is bounded by
+  a per-conversation turn cap and a short timeout; a failed turn closes the mic.
+  Conversation context (including any clarification) is held briefly per
+  conversation on the cloud side.
 - **Custom "Hey HomeCasa" wake word** is out of scope here; use the puck's
   built‑in wake word and route the pipeline to the HomeCasa agent.
 - **Reaching the cloud:** the puck/HA must be able to reach the HomeCasa Cloud

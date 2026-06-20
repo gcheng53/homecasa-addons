@@ -79,6 +79,13 @@ class HomeCasaConversationEntity(conversation.ConversationEntity):
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    # HomeCasa voice is turned off for this home: stay silent
+                    # instead of speaking the "couldn't reach HomeCasa" fallback.
+                    if data.get("muted"):
+                        return conversation.ConversationResult(
+                            response=intent.IntentResponse(language=language),
+                            conversation_id=conversation_id,
+                        )
                     speech = data.get("response") or ""
                     continue_conversation = bool(
                         data.get("continue_conversation")
